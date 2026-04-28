@@ -10,20 +10,16 @@ const runCLI = () => {
     .version("1.0.0")
     .argument("[dir]")
     .action(async (dir) => {
-      if (dir === undefined) {
-        const dirname = await readdir("./");
-        for (const dirlist of dirname) {
-          consola.log("list");
-          consola.log("-------------------------------");
-          consola.log(dirlist);
-        }
-      } else {
-        const dirname = await readdir(dir);
-        for (const dirlist of dirname) {
-          consola.log("list");
-          consola.log("-------------------------------");
-          consola.log(dirlist);
-        }
+      const target = dir ?? "./";
+      const dirname = await readdir(target);
+      for (const dirlist of dirname) {
+        consola.log("list");
+        consola.log("-------------------------------");
+        consola.log(dirlist);
       }
     });
+
+  program.parse();
 };
+
+runCLI();
