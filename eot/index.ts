@@ -11,7 +11,7 @@ const runCLI = () => {
     .argument("[dir]")
     .action(async (dir) => {
       if (dir === undefined) {
-        const dirname = await readdir(".");
+        const dirname = await readdir("./");
         for (const dirlist of dirname) {
           consola.log("list");
           consola.log("-------------------------------");
@@ -27,4 +27,3 @@ const runCLI = () => {
       }
     });
 };
-
