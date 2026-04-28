@@ -1,0 +1,17 @@
+{
+  "name": "eot",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "commander": "^14.0.3",
+    "consola": "^3.4.2",
+    "fs": "^0.0.1-security"
+  }
+}
