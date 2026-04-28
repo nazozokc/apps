@@ -12,9 +12,9 @@ const runCLI = () => {
     .action(async (dir) => {
       const target = dir ?? "./";
       const dirname = await readdir(target);
+      consola.log("list");
+      consola.log("-------------------------------");
       for (const dirlist of dirname) {
-        consola.log("list");
-        consola.log("-------------------------------");
         consola.log(dirlist);
       }
     });
