@@ -8,5 +8,10 @@
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "dependencies": {
+    "consola": "^3.4.2",
+    "execa": "^9.6.1",
+    "gunshi": "^0.29.4"
   }
 }
