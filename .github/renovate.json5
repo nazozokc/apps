@@ -2,8 +2,6 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
   "enabledManagers": ["npm", "bun"],
-  "npm": {
-    "minimumReleaseAge": "3 days"
-  },
+  "minimumReleaseAge": "3 days",
   "schedule": ["every 3 hours"]
 }
