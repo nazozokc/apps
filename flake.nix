@@ -1,9 +1,11 @@
 {
-  description = "CLI test tools dev environment";
+  description = "CLI tools monorepo — auto-discovered";
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
   };
+
   outputs =
     {
       self,
@@ -14,24 +16,86 @@
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        lib = pkgs.lib;
+        root = ./.;
+        rootStr = toString root;
 
-        # buildスクリプト + bin エントリがある奴だけパッケージ化
-        mkTool =
+        # ------------------------------------------------------------------
+        # Auto-discovery
+        # ------------------------------------------------------------------
+        excludeDirs = [
+          ".git"
+          ".github"
+          "node_modules"
+          "result"
+        ];
+
+        entries = builtins.readDir root;
+
+        # Directories only, exclude hidden / non-tool dirs
+        toolDirs = lib.filterAttrs (
+          name: type: type == "directory" && !builtins.elem name excludeDirs && !lib.hasPrefix "." name
+        ) entries;
+
+        # Check if a file exists inside a tool dir
+        hasFile = dir: file: builtins.pathExists "${rootStr}/${dir}/${file}";
+
+        # Read optional .nix-tool.nix config
+        readConfig =
+          dir:
+          let
+            p = "${rootStr}/${dir}/.nix-tool.nix";
+          in
+          if builtins.pathExists p then import p else { };
+
+        # ------------------------------------------------------------------
+        # Bun tool builder
+        # ------------------------------------------------------------------
+        mkBunTool =
           {
             pname,
-            version,
-            src,
-            npmDepsHash,
-            binName,
+            binName ? pname,
+            entryPoint ? "index.ts",
+            installDeps ? false,
+          }:
+          pkgs.stdenv.mkDerivation {
+            pname = pname;
+            version = "0.1.0";
+            src = rootStr + "/${pname}";
+            buildInputs = [ pkgs.bun ];
+            dontBuild = true;
+            installPhase = ''
+              runHook preInstall
+              mkdir -p $out/bin $out/lib/${pname}
+              cp -r . $out/lib/${pname}/
+              cd $out/lib/${pname}
+              ${lib.optionalString installDeps ''
+                bun install --frozen-lockfile 2>/dev/null || true
+              ''}
+              cat > $out/bin/${binName} <<'WRAPPER'
+              #!/bin/sh
+              exec ${pkgs.bun}/bin/bun run $out/lib/${pname}/${entryPoint} "$@"
+              WRAPPER
+              chmod +x $out/bin/${binName}
+              runHook postInstall
+            '';
+          };
+
+        # ------------------------------------------------------------------
+        # Node build tool builder (tsc / tsup)
+        # ------------------------------------------------------------------
+        mkNodeTool =
+          {
+            pname,
+            binName ? pname,
             buildCmd ? "npx tsc",
+            npmDepsHash ? pkgs.lib.fakeHash,
           }:
           pkgs.buildNpmPackage {
-            inherit
-              pname
-              version
-              src
-              npmDepsHash
-              ;
+            pname = pname;
+            version = "0.1.0";
+            src = rootStr + "/${pname}";
+            inherit npmDepsHash;
             nodejs = pkgs.nodejs_22;
 
             buildPhase = ''
@@ -47,80 +111,100 @@
               cp package.json $out/lib/${pname}/
               npm prune --omit=dev 2>/dev/null || true
               [ -d node_modules ] && cp -r node_modules $out/lib/${pname}/
-
               mkdir -p $out/bin
-              cat > $out/bin/${binName} <<WRAPPER
+              cat > $out/bin/${binName} <<'WRAPPER'
               #!/bin/sh
-              exec node $out/lib/${pname}/dist/index.js "\$@"
+              exec node $out/lib/${pname}/dist/index.js "$@"
               WRAPPER
               chmod +x $out/bin/${binName}
               runHook postInstall
             '';
           };
 
+        # ------------------------------------------------------------------
+        # Classify & build each tool directory
+        # ------------------------------------------------------------------
+        buildTool =
+          name:
+          let
+            cfg = readConfig name;
+
+            # If type is explicitly set in .nix-tool.nix, trust it
+            toolType =
+              cfg.type or (
+                if hasFile name "tsconfig.json" then
+                  "node"
+                else if hasFile name "bun.lock" || hasFile name "bun.lockb" then
+                  "bun"
+                else if hasFile name "index.ts" then
+                  "bun"
+                else
+                  null
+              );
+
+            # Detect entry point for bun tools
+            bunEntry = if hasFile name "src/index.ts" then "src/index.ts" else "index.ts";
+          in
+          if toolType == "bun" then
+            mkBunTool {
+              pname = cfg.pname or name;
+              binName = cfg.binName or name;
+              entryPoint = cfg.entryPoint or bunEntry;
+              installDeps = hasFile name "bun.lock" || hasFile name "bun.lockb";
+            }
+          else if toolType == "node" then
+            mkNodeTool {
+              pname = cfg.pname or name;
+              binName = cfg.binName or name;
+              buildCmd = cfg.buildCmd or "npx tsc";
+              npmDepsHash = cfg.npmDepsHash or pkgs.lib.fakeHash;
+            }
+          else
+            null;
+
+        # Build all tools, filter out nulls (unrecognised dirs)
+        toolList = builtins.filter (x: x.value != null) (
+          builtins.map (n: {
+            name = n;
+            value = buildTool n;
+          }) (builtins.attrNames toolDirs)
+        );
+
+        toolPackages = builtins.listToAttrs toolList;
+
+        # Pick a sensible default: git-taiwa or first alphabetically
+        defaultPkg =
+          if toolPackages ? git-taiwa then
+            toolPackages.git-taiwa
+          else if toolList != [ ] then
+            (builtins.head toolList).value
+          else
+            null;
+
       in
       {
-        packages = {
-          git-taiwa = mkTool {
-            pname = "git-taiwa";
-            version = "1.0.0";
-            src = ./git-taiwa;
-            binName = "git-taiwa";
-            buildCmd = "npx tsup src/index.ts --format esm";
-            # nix build .#git-taiwa 後に出るhashをここに貼る
-            npmDepsHash = "sha256-ge/GdDDC4/ntNai5FeR19NfXuWoxkzqf/1VvHP24wpE=";
-          };
-
-          note = mkTool {
-            pname = "note";
-            version = "0.1.0";
-            src = ./simple-note-cli;
-            binName = "note";
-            npmDepsHash = "sha256-xXZDwfieS/NIsdpVbAC0rqz+8XQiYcQwhgGT1v8uX7Q=";
-          };
-
-          todo = mkTool {
-            pname = "todo";
-            version = "0.1.0";
-            src = ./simple-todo-cli;
-            binName = "todo";
-            npmDepsHash = "sha256-Uwt5lni9eVEQY83WRyOD96bgWrq2VL3T3mDONCC0Cso=";
-          };
-
-          wc = mkTool {
-            pname = "wc-cli";
-            version = "0.1.0";
-            src = ./wc;
-            binName = "wc-cli";
-            npmDepsHash = "sha256-E8oMvueyhVqLfM2uIU7B68tWmRvkZ/xL1r7TXET9mLc=";
-          };
-
-          text-util = mkTool {
-            pname = "text-util";
-            version = "0.1.0";
-            src = ./text-util;
-            binName = "text-util";
-            npmDepsHash = "sha256-lnXd29P+LWRHxmP/hIXULiYXNZ0P5V/fY6xH7nKVZJw=";
-          };
-
-          default = self.packages.${system}.git-taiwa;
+        packages = toolPackages // {
+          default = defaultPkg;
         };
 
         devShells.default = pkgs.mkShell {
-          name = "cli-test-tool";
+          name = "cli-tools-dev";
           packages = with pkgs; [
             nodejs_22
             nodePackages.typescript
             nodePackages.pnpm
+            bun
             claude-code
             opencode
           ];
           shellHook = ''
-            echo "CLI Test Tool dev shell"
-            echo "Node: $(node --version)"
-            echo "npm:  $(npm --version)"
-            echo "pnpm: $(pnpm --version)"
-            echo "install: claude-code, opencode"
+            echo "CLI Tools Dev Shell (auto-discovered)"
+            echo "Node: $(node --version)  Bun: $(bun --version)"
+            echo ""
+            echo "Available packages:"
+            ${builtins.concatStringsSep "\n" (
+              builtins.map (n: "echo \"  nix run .#${n}\"") (builtins.attrNames toolPackages)
+            )}
           '';
         };
       }
